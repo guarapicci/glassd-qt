@@ -8,16 +8,31 @@ extern "C"{
 
     #include <omniGlass/constants.h>
     #include <omniGlass/omniglass.h>
+
 }
-class glassd: public QObject
+class Glassd: public QObject
 {
     Q_OBJECT
 public:
-    //enumerations used while operating glassd's core logic.
-    enum class tracking_mode { INHIBIT, INHIBIT_TO_GLASSING, GLASSING, MENU, JINX };
-    enum class status { blank, no_virtual_input, ready, reconfiguring, krashed };
+    //enumerations used while operating Glassd's core logic.
+    enum class tracking_mode: int
+    {
+        INHIBIT = 0, //not mapping any gestures.
+        INHIBIT_TO_GLASSING, //mode-switch gesture is in progress (finishing leads to GLASSING)
+        GLASSING, //mode-switch happened, gestures now will lead to modes that perform keyboard/mouse macros.
+        MENU, //the gesture assigned to menu navigation was triggered. Focus a menu element and trigger it.
+        JINX //the state machines are stuck. You might want to re-init Glassd.
+    };
+    enum class status: int
+    {
+        blank = 0, //Glassd was just created. Honestly this state is just a detail of the C++ QObject binding.
+        no_virtual_input, //Glassd couldn't initialize completely. Best case: no virtual input. Worst case: krash!
+        ready, //Glassd is in the proper state to scan for gestures on the next step() call.
+        reconfiguring, //Glassd is recovering from some invalid state right now, so step() will not work.
+        krashed //Glassd is borked. Stuff will not work. You might want to reset it..
+    };
 
-    glassd():
+    Glassd():
         movement_deadzone {GLASSD_DEFAULTS_TOUCHPAD_DEADZONE},
         edge_slide_accumulated {0.0},
         edge_slide_threshold {GLASSD_DEFAULTS_TAB_MOVEMENT_THRESHOLD},
@@ -33,26 +48,36 @@ public:
         init();
     }
 
-
-    void init();
     //void run();
 
     //EVENTUALLY FIX THIS PLEASE:
     //  destructor should gracefully free structures for
     //  libevdev, omniglass, file descriptors, etc.
-    ~glassd(){};
+    ~Glassd(){};
 
-    status get_status();
+
 
 public slots:
     //void glassd_run();
+
+    //set up Glassd to start tracking gestures with step().
+    void init();
+
+    //compute all gesture stuff that happened between last step() call and right now.
     void step();
+
+    //query status, as in: is it broken? is it running properly? is it stuck?
+    status get_status();
+
+    tracking_mode get_current_tracking_mode();
+
     //int focused_application_changed(QString application_canonical_name);
 signals:
-    int touchpad_mode_switched();
+    //(NOTIMPL) emitted when the gesture tracker changes gesture mapping mode.
+    void touchpad_mode_switched(tracking_mode mode);
 
     //you can ignore most of the following implementation details,
-    //unless you're actually modifying glassd's behavior and not the GUI around it.
+    //unless you're actually modifying Glassd's behavior and not the GUI around it.
 private:
 
     //constants
@@ -100,8 +125,17 @@ private:
     void generate_menu(struct libevdev_uinput *handle);
     void generate_space_tap(struct libevdev_uinput *handle);
     void generate_enter_tap(struct libevdev_uinput *handle);
+
+    //state machine maintenance operations
     void glassd_update_edge(double amount, void *data);
     void check_points(omniglass_raw_report *report, void *data);
+    void modeswitch(tracking_mode new_mode);
 
+//legacy c code interop
+public:
+    void refresh_edge_slide(double amount){
+        this->edge_slide_accumulated += amount;
+    }
 };
+
 #endif // GLASSD_H

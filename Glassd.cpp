@@ -1,5 +1,5 @@
 
-#include "glassd.h"
+#include "Glassd.h"
 
 extern "C" {
 #include <asm-generic/errno-base.h>
@@ -8,46 +8,56 @@ extern "C" {
 #include <stdio.h>
 #include <unistd.h>
 #include <math.h>
+
+}
+
+void glassd_handle_edge_swipe(double swipe_amount, void *passthrough){
+    Glassd *instance = (Glassd *) passthrough;
+    instance->refresh_edge_slide(swipe_amount);
 }
 
 //linear algebra
-double glassd::euclidean_distance(omniglass_raw_touchpoint p0, omniglass_raw_touchpoint p1){
+double Glassd::euclidean_distance(omniglass_raw_touchpoint p0, omniglass_raw_touchpoint p1){
     return sqrt((pow((p1.x - p0.x), 2) + pow((p1.y - p0.y),2)));
 }
 
 //utility function for registering all evdev input event codes sent by our virtual input devices.
 //array of input codes must be terminated by {-1, -1}.
 //this is similar in practice to HID's device descriptors
-void glassd::register_input_codes(struct libevdev *handle, int codes[]){
+void Glassd::register_input_codes(struct libevdev *handle, int codes[]){
     for (int i=0; codes[i] != -1 && codes[i+1] != -1; i+=2){
         libevdev_enable_event_code(handle, codes[i], codes[i+1], NULL);
     }
 }
 
 //check overall status of the touchpad handler
-glassd::status glassd::get_status()
+Glassd::status Glassd::get_status()
 {
     return execution_status;
 }
 
+Glassd::tracking_mode Glassd::get_current_tracking_mode()
+{
+    return current_mode;
+}
 //
 //SHORTHAND FUNCTIONS: virtual keypresses
 //
-void glassd::press_F_to_pay_respects(struct libevdev_uinput *handle){
+void Glassd::press_F_to_pay_respects(struct libevdev_uinput *handle){
     libevdev_uinput_write_event(handle, EV_KEY, KEY_F, 1);
     libevdev_uinput_write_event(handle, EV_SYN, SYN_REPORT, 0);
     libevdev_uinput_write_event(handle, EV_KEY, KEY_F, 0);
     libevdev_uinput_write_event(handle, EV_SYN, SYN_REPORT, 0);
 }
 
-void glassd::generate_tab(struct libevdev_uinput *handle){
+void Glassd::generate_tab(struct libevdev_uinput *handle){
     libevdev_uinput_write_event(handle, EV_KEY, KEY_TAB, 1);
     libevdev_uinput_write_event(handle, EV_SYN, SYN_REPORT, 0);
     libevdev_uinput_write_event(handle, EV_KEY, KEY_TAB, 0);
     libevdev_uinput_write_event(handle, EV_SYN, SYN_REPORT, 0);
 }
 
-void glassd::generate_shift_tab(struct libevdev_uinput *handle){
+void Glassd::generate_shift_tab(struct libevdev_uinput *handle){
     libevdev_uinput_write_event(handle, EV_KEY, KEY_LEFTSHIFT, 1);
     libevdev_uinput_write_event(handle, EV_SYN, SYN_REPORT, 0);
     libevdev_uinput_write_event(handle, EV_KEY, KEY_TAB, 1);
@@ -57,38 +67,45 @@ void glassd::generate_shift_tab(struct libevdev_uinput *handle){
     libevdev_uinput_write_event(handle, EV_SYN, SYN_REPORT, 0);
 }
 
-void glassd::generate_menu(struct libevdev_uinput *handle){
+void Glassd::generate_menu(struct libevdev_uinput *handle){
     libevdev_uinput_write_event(handle, EV_KEY, KEY_F10, 1);
     libevdev_uinput_write_event(handle, EV_SYN, SYN_REPORT, 0);
     libevdev_uinput_write_event(handle, EV_KEY, KEY_F10, 0);
     libevdev_uinput_write_event(handle, EV_SYN, SYN_REPORT, 0);
 }
 
-void glassd::generate_space_tap(struct libevdev_uinput *handle){
+void Glassd::generate_space_tap(struct libevdev_uinput *handle){
     libevdev_uinput_write_event(handle, EV_KEY, KEY_SPACE, 1);
     libevdev_uinput_write_event(handle, EV_SYN, SYN_REPORT, 0);
     libevdev_uinput_write_event(handle, EV_KEY, KEY_SPACE, 0);
     libevdev_uinput_write_event(handle, EV_SYN, SYN_REPORT, 0);
 }
-void glassd::generate_enter_tap(struct libevdev_uinput *handle){
+void Glassd::generate_enter_tap(struct libevdev_uinput *handle){
     libevdev_uinput_write_event(handle, EV_KEY, KEY_ENTER, 1);
     libevdev_uinput_write_event(handle, EV_SYN, SYN_REPORT, 0);
     libevdev_uinput_write_event(handle, EV_KEY, KEY_ENTER, 0);
     libevdev_uinput_write_event(handle, EV_SYN, SYN_REPORT, 0);
 }
-void glassd::glassd_update_edge(double amount, void *data){
-    glassd *state = (glassd *)data;
-    if(amount > state->movement_deadzone || amount < (-1 * state->movement_deadzone))
+void Glassd::glassd_update_edge(double amount, void *data){
+    Glassd *state = (Glassd *)data;
+    if (amount > state->movement_deadzone
+        || amount < (-1 * state->movement_deadzone))
+    {
         state->edge_slide_accumulated += amount;
+    }
 }
-void glassd::check_points(omniglass_raw_report *report, void *data){
-    glassd *state = (glassd *)data;
+void Glassd::check_points(omniglass_raw_report *report, void *data){
+    Glassd *state = (Glassd *)data;
     state->single_finger_last_state = state->current_report->points[0];
     state->current_report = report;
 }
 
-//set up all the lower layers the glassd core instance will operate.
-void glassd::init(){
+void Glassd::modeswitch(tracking_mode new_mode){
+    current_mode = new_mode;
+    emit(touchpad_mode_switched(new_mode));
+}
+//set up all the lower layers the Glassd core instance will operate.
+void Glassd::init(){
 
     //initialize interface to omniGlass touchpad backend
     struct omniglass *touchpad_handle;
@@ -101,7 +118,7 @@ void glassd::init(){
 
     //FIXME: C++ does not allow passing members of class instances as callback.
     //  change omniglass to make it export gesture events into parameters on step().
-    //omniglass_listen_gesture_edge(touchpad_handle, (glassd::glassd_update_edge), OMNIGLASS_EDGE_TOP, this);
+    omniglass_listen_gesture_edge(touchpad_handle, glassd_handle_edge_swipe, OMNIGLASS_EDGE_TOP, this);
 
     //
     //VIRTUAL KEYBOARD INIT - prepare a virtual keyboard with a specific set of keys
@@ -141,19 +158,19 @@ void glassd::init(){
 
     //endless state machine execution loop,
     //adapted into non-blocking step function with class instance for state.
-void glassd::step(){
+void Glassd::step(){
         int omniglass_status = omniglass_step(handle);
 
         if(omniglass_status != 0){
-            fprintf(stderr, "somehow omniglass returned error on step. I didn't even code it to do that!\n");
-            current_mode = tracking_mode::JINX;
+            fprintf(stderr, "Guarapicci here. Somehow omniglass returned error on step. I didn't even code it to do that!\n");
+            modeswitch(tracking_mode::JINX);
             return;
         }
-        if(single_finger_last_state.is_touching){
-            // double distance = euclidean_distance(state.current_report->points[0], (omniglass_raw_touchpoint){45,120,0});
-            // printf("you are %f units away from the set point.\n",distance);
-            // printf("touching at (%f,%f)\n",state.single_finger_last_state.x, state.single_finger_last_state.y);
-        }
+        // if(single_finger_last_state.is_touching){
+        //     double distance = euclidean_distance(current_report->points[0], omniglass_raw_touchpoint({true,45,120}));
+        //     printf("you are %f units away from the test ref point.\n",distance);
+        //     printf("touching at (%f,%f)\n",single_finger_last_state.x, single_finger_last_state.y);
+        // }
         switch(current_mode){
         case tracking_mode::INHIBIT:    //waiting for the user to start switching modes.
             if(
@@ -165,15 +182,14 @@ void glassd::step(){
                 )
             {
                 printf("waiting on glassing drag.\n");
-                current_mode=tracking_mode::INHIBIT_TO_GLASSING;
+                modeswitch(tracking_mode::INHIBIT_TO_GLASSING);
             }
             break;
         case tracking_mode::INHIBIT_TO_GLASSING: //user is trying to switch modes.
             if (current_report->points[0].is_touching){
                 omniglass_raw_touchpoint current = current_report->points[0];
                 omniglass_raw_touchpoint previous = single_finger_last_state;
-                omniglass_raw_touchpoint drag =
-                omniglass_raw_touchpoint
+                omniglass_raw_touchpoint drag
                 ({
                     1,
                     current.x - previous.x,
@@ -190,13 +206,13 @@ void glassd::step(){
                     printf("drag triggered glassing mode.\n");
                     drag_to_glassing_accumulator = 0;
                     edge_slide_accumulated = 0;
-                    current_mode = tracking_mode::GLASSING;
+                    modeswitch(tracking_mode::GLASSING);
                 }
             }
             else{
                 printf("drag incomplete, returning to inhibit.\n");
                 drag_to_glassing_accumulator = 0;
-                current_mode=tracking_mode::INHIBIT;
+                modeswitch(tracking_mode::INHIBIT);
             }
             break;
         case tracking_mode::GLASSING:   //glassing mode: different gestures started will result in different keyboard strokes emulated.
@@ -204,14 +220,14 @@ void glassd::step(){
                 generate_menu(virtual_keyboard);
                 edge_slide_accumulated = 0;
                 printf("sliding on edge triggered menu mode.\n");
-                current_mode = tracking_mode::MENU;
+                modeswitch(tracking_mode::MENU);
             }
             if(current_report->points[0].is_touching
                 && !(single_finger_last_state.is_touching)
                 && euclidean_distance(current_report->points[0], omniglass_raw_touchpoint({0,45,120})) < DEFAULT_POINT_RADIUS)
             {
                 printf("touch on corner returned from glassing mode.\n");
-                current_mode = tracking_mode::INHIBIT;
+                modeswitch(tracking_mode::INHIBIT);
             }
             break;
         case tracking_mode::MENU: // menu mode: dragging horizontally on top edge selects menus and buttons to actuate on the focused application.
@@ -226,7 +242,7 @@ void glassd::step(){
             if (!(current_report->points[0].is_touching)){
                 generate_enter_tap(virtual_keyboard);
                 printf("returning from menu.\n");
-                current_mode = tracking_mode::INHIBIT;
+                modeswitch(tracking_mode::INHIBIT);
             }
             break;
         case tracking_mode::JINX:   //hold still, don't panic, avoid breaking anything else.
