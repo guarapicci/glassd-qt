@@ -13,13 +13,13 @@ class Glassd_dbus: public QDBusAbstractAdaptor{
     Q_OBJECT
     Q_CLASSINFO("D-Bus Interface", "com.guarapicci.glassd")
 public slots:
-    Glassd::status get_gesture_handler_status()
+    int get_gesture_handler_status()
     {
-        return target->get_status();
+        return static_cast<int>(target->get_status());
     } //current Glassd status
-    Glassd::tracking_mode get_current_tracking_mode() //current gesture tracking mode
+    int get_current_tracking_mode() //current gesture tracking mode
     {
-        return target->get_current_tracking_mode();
+        return static_cast<int>(target->get_current_tracking_mode());
     }
     QString get_application_canonical_name(){return QString("i.dont.have.it.lol");} //canonical name for the current focused application on the desktop, AKA "desktop file name" or "dbus service name"
     void set_application_canonical_name(const QString new_name){fprintf(stderr, "omniglass was informed that the current active application has changed.\n");}
