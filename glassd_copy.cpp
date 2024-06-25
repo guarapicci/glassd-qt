@@ -2,7 +2,7 @@
 
 extern "C" {
 
-#include "glassd.h"
+#include "Glassd.h"
 
 #include <asm-generic/errno-base.h>
 #include <linux/input-event-codes.h>
