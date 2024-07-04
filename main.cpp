@@ -1,6 +1,9 @@
-#include <QCoreApplication>
+#include <QGuiApplication>
 #include <QTimer>
 #include <QObject>
+
+#include <QtQml>
+#include <QtQuick>
 
 #include <QtDBus>
 
@@ -15,7 +18,7 @@ int main(int argc, char *argv[])
 
 
 
-    QCoreApplication a(argc, argv);
+    QGuiApplication a(argc, argv);
 
     Glassd touchpad_tracker = Glassd();
     touchpad_tracker.init();
@@ -35,9 +38,20 @@ int main(int argc, char *argv[])
     // QQuickWindow viz();
     // viz.
 
+    QQmlEngine engine;
+
+    QQmlComponent viz(&engine);
+    QQuickWindow::setDefaultAlphaBuffer(true);
+    viz.loadUrl(QUrl("qrc:/qml/viz_default.qml"));
+
+
     glassd_timer.start();
 
-
+    QQuickView view;
+    view.connect(view.engine(), &QQmlEngine::quit, &a, &QCoreApplication::quit);
+    view.setSource(QUrl("qrc:/qml/viz_default.qml"));
+    view.setResizeMode(QQuickView::SizeRootObjectToView);
+    view.show();
 
     // glassd_timer
         return a.exec();
