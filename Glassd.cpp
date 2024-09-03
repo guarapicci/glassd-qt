@@ -40,6 +40,19 @@ Glassd::tracking_mode Glassd::get_current_tracking_mode()
 {
     return current_mode;
 }
+
+QString Glassd::get_current_application_canonical_id
+    () const
+{
+    return current_application_canonical_id;
+}
+
+void Glassd::setCurrent_application_canonical_id(const QString &newCurrent_application_canonical_id)
+{
+    current_application_canonical_id = newCurrent_application_canonical_id;
+}
+
+
 //
 //SHORTHAND FUNCTIONS: virtual keypresses
 //

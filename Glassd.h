@@ -89,6 +89,8 @@ private:
     const double DEFAULT_POINT_RADIUS = 24.1;
     const double DEFAULT_DRAG_TRIGGER_DISTANCE = 25;
 
+    QString current_application_canonical_id = "";
+
     //enumerations for state machine
     enum class dragging_action_state { STARTED, DRAGGING, CROSSED };
 
@@ -136,6 +138,9 @@ public:
     void refresh_edge_slide(double amount){
         this->edge_slide_accumulated += amount;
     }
+
+    QString get_current_application_canonical_id() const;
+    void setCurrent_application_canonical_id(const QString &newCurrent_application_canonical_id);
 };
 
 #endif // GLASSD_H
