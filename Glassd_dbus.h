@@ -23,9 +23,15 @@ public slots:
     }
     QString get_application_canonical_name(){return QString(target->get_current_application_canonical_id());} //canonical name for the current focused application on the desktop, AKA "desktop file name" or "dbus service name"
     void set_application_canonical_name(QString new_name){
-        qDebug() << "omniglass was informed that the current active application has changed to " << new_name<< Qt::endl;
-        target->setCurrent_application_canonical_id(new_name);
-        target->change_gesture_mapper(new_name);
+        if(!(new_name.isEmpty())){
+            qDebug() << "omniglass was informed that the current active application has changed to " << new_name<< Qt::endl;
+            target->setCurrent_application_canonical_id(new_name);
+            target->change_gesture_mapper(new_name);
+        }
+        else{
+            qDebug() << "window with empty title." << Qt::endl;
+            target->setCurrent_application_canonical_id("");
+        }
     }
 
 
