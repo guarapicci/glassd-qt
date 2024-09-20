@@ -9,19 +9,23 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core)
+find_package(QT NAMES Qt6 REQUIRED COMPONENTS Core)
+message(STATUS "Found Qt ${QT_VERSION_MAJOR}")
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core)
 
-find_package(Qt6 REQUIRED COMPONENTS DBus Qml Gui Quick)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS DBus Qml Gui Quick)
 
 add_executable(glassd
+    Glassd.h
+    Glassd_dbus.h
   main.cpp
-  Glassd.h Glassd.cpp
-  Glassd_dbus.h
-  qml/viz_default.qml
-  viz_wrangler.h viz_wrangler.cpp
-  #glassd_copy.cpp
+  Glassd.cpp
+  qml/viz_default.qml viz_wrangler.cpp
+  Gesture_mapper.h Gesture_mapper.cpp
+  Gesture_handlers.h
+
 )
+
 target_link_libraries(glassd
     Qt${QT_VERSION_MAJOR}::Core
     evdev

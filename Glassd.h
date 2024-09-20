@@ -2,6 +2,13 @@
 #define GLASSD_H
 
 #include <QObject>
+#include <map>
+
+#include "Gesture_mapper.h"
+#include "Gesture_handlers.h"
+
+#include <list>
+
 extern "C"{
     #include <libevdev/libevdev.h>
     #include <libevdev/libevdev-uinput.h>
@@ -9,15 +16,15 @@ extern "C"{
     #include <omniGlass/constants.h>
     #include <omniGlass/omniglass.h>
 
+    #include <stdio.h>
 }
 class Glassd: public QObject
 {
     Q_OBJECT
 public:
     //enumerations used while operating Glassd's core logic.
-    enum class tracking_mode: int
-    {
-        INHIBIT = 0, //not mapping any gestures.
+    enum class tracking_mode : int {
+        INHIBIT = 0,         //not mapping any gestures.
         INHIBIT_TO_GLASSING, //mode-switch gesture is in progress (finishing leads to GLASSING)
         GLASSING, //mode-switch happened, gestures now will lead to modes that perform keyboard/mouse macros.
         MENU, //the gesture assigned to menu navigation was triggered. Focus a menu element and trigger it.
@@ -32,21 +39,41 @@ public:
         krashed //Glassd is borked. Stuff will not work. You might want to reset it..
     };
 
-    Glassd():
-        movement_deadzone {GLASSD_DEFAULTS_TOUCHPAD_DEADZONE},
-        edge_slide_accumulated {0.0},
-        edge_slide_threshold {GLASSD_DEFAULTS_TAB_MOVEMENT_THRESHOLD},
-        tapped {0},
-        finger_pressed {0},
-        current_mode {tracking_mode::MENU},
-        touchpad_specifications {NULL},
-        single_finger_last_state {0,0,0},
-        current_report {NULL},
-        handle {NULL},
-        execution_status {status::blank}
+    //detailed parameters related to real-time interaction between a hand and the touchpad.
+    //  honestly this should be computed at the omniglass lua layer,
+    //  but right now glassd is the only application using it.
+    struct touchpad_tracking_data
+    {
+        uint8_t touch_count_transition = 255; //0 is no touch; touch-counts are between 1 and 23; 255 is no-change;
+        float single_touch_drag_x = 0;
+        float single_touch_drag_y = 0;
+        bool is_on_top_edge = false;
+        bool is_on_bottom_edge = false;
+        bool is_on_left_edge = false;
+        bool is_on_right_edge = false;
+        float rotation = 0;  //(NOT IMPLEMENTED) angle since last observation, in radians.
+        int multifinger = 0; //(NOT IMPLEMENTED)
+        float drags[4][2] = {{0, 0}, {0, 0}, {0, 0}, {0, 0}};
+    };
+
+    Glassd()
+        : movement_deadzone{GLASSD_DEFAULTS_TOUCHPAD_DEADZONE}
+        , edge_slide_accumulated{0.0}
+        , edge_slide_threshold{GLASSD_DEFAULTS_TAB_MOVEMENT_THRESHOLD}
+        , tapped{0}
+        , finger_pressed{0}
+        , current_mode{tracking_mode::INHIBIT}
+        , touchpad_specifications{NULL}
+        , single_finger_last_state{0, 0, 0}
+        , current_report{NULL}
+        , handle{NULL}
+        , execution_status{status::blank}
     {
         init();
     }
+
+
+    void change_gesture_mapper(QString name);
 
     //void run();
 
@@ -54,8 +81,8 @@ public:
     //  destructor should gracefully free structures for
     //  libevdev, omniglass, file descriptors, etc.
     ~Glassd(){};
-
-
+    //GAHAHAHAH I'M UNEMPLOYED AND DROWNED IN CALCULUS HOMEWORK
+    //i ain't fixing it.
 
 public slots:
     //void glassd_run();
@@ -101,15 +128,34 @@ private:
     int tapped{};
     int finger_pressed{};
     tracking_mode current_mode{};
+    touchpad_tracking_data gesture_data; //fine-grained gesture parameter data.
+
+    //gesture mappers with profiles
+    std::map<QString, Gesture_mapper *> mappers;
+    std::map<QString, QString> application_classes;
+    Gesture_mapper::gesture_action current_action;
+    Gesture_mapper *current_gesture_mapper;
+
+    //gesture handlers with internal state for each gesture
+    Gesture_handlers::Handler_drag handler_drag;
+
+    //...
+    //egads, this is getting big.
+    //should i be shoving this much into a single class?
 
     //omniglass C interface wrapped inside private members.
     struct omniglass *handle;
     omniglass_raw_specifications *touchpad_specifications{};
     omniglass_raw_touchpoint single_finger_last_state{};
     omniglass_raw_report *current_report{};
+    omniglass_raw_report previous_report{4,
+                                         (omniglass_raw_touchpoint *) malloc(
+                                             sizeof(omniglass_raw_touchpoint) * 4)};
     double drag_to_glassing_accumulator;
     struct libevdev_uinput *virtual_keyboard;
     // struct libevdev_uinput *virtual_touchpad;
+
+    int raw_touchpad_file_descriptor{-1};
 
     status execution_status;
 
@@ -133,8 +179,20 @@ private:
     void check_points(omniglass_raw_report *report, void *data);
     void modeswitch(tracking_mode new_mode);
 
-//legacy c code interop
+    //gesture tracking and mapping maintenance
+    void compute_gesture_parameters();
+    Gesture_mapper::gesture_action compute_gesture_next_action();
+
+    //
+    //OFFLOAD: bits of code too long to put inside the usual functions
+    // and too small in significance to the semantics.
+    void generate_default_mappers();
+
 public:
+    //stuff that the state machine code will use
+    void simulate_keycodes(std::list<__u16> keycodes);
+
+    //legacy c code interop
     void refresh_edge_slide(double amount){
         this->edge_slide_accumulated += amount;
     }

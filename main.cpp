@@ -35,23 +35,22 @@ int main(int argc, char *argv[])
     QDBusConnection dbus_connection = QDBusConnection::sessionBus();
     dbus_connection.registerObject("/glassd",&touchpad_tracker);
     dbus_connection.registerService("com.guarapicci.glassd");
-    // QQuickWindow viz();
-    // viz.
+
 
     QQmlEngine engine;
 
-    QQmlComponent viz(&engine);
-    QQuickWindow::setDefaultAlphaBuffer(true);
-    viz.loadUrl(QUrl("qrc:/qml/viz_default.qml"));
+    // QQmlComponent viz(&engine);
+    // QQuickWindow::setDefaultAlphaBuffer(true);
+    // viz.loadUrl(QUrl("qrc:/qml/viz_default.qml"));
 
 
     glassd_timer.start();
 
-    QQuickView view;
-    view.connect(view.engine(), &QQmlEngine::quit, &a, &QCoreApplication::quit);
-    view.setSource(QUrl("qrc:/qml/viz_default.qml"));
-    view.setResizeMode(QQuickView::SizeRootObjectToView);
-    view.show();
+    // QQuickView view;
+    // view.connect(view.engine(), &QQmlEngine::quit, &a, &QCoreApplication::quit);
+    // view.setSource(QUrl("qrc:/qml/viz_default.qml"));
+    // view.setResizeMode(QQuickView::SizeRootObjectToView);
+    // view.show();
 
     // glassd_timer
         return a.exec();

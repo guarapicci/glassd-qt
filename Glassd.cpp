@@ -1,4 +1,3 @@
-
 #include "Glassd.h"
 
 extern "C" {
@@ -8,6 +7,9 @@ extern "C" {
 #include <stdio.h>
 #include <unistd.h>
 #include <math.h>
+
+#include <linux/ioctl.h>
+#include <linux/input.h>
 
 }
 
@@ -117,6 +119,11 @@ void Glassd::modeswitch(tracking_mode new_mode){
     current_mode = new_mode;
     emit(touchpad_mode_switched(new_mode));
 }
+void Glassd::change_gesture_mapper(QString name){
+    current_gesture_mapper->reset();
+    current_gesture_mapper = mappers[application_classes[current_application_canonical_id]];
+}
+
 //set up all the lower layers the Glassd core instance will operate.
 void Glassd::init(){
 
@@ -125,9 +132,17 @@ void Glassd::init(){
     if (omniglass_init(&touchpad_handle) != OMNIGLASS_RESULT_SUCCESS) {
         fprintf(stderr, "failed to initialize touchpad gesture engine.");
     }
+
+    // ioctl(raw_touchpad_file_descriptor,EVIOCGRAB, 1);
+
+
     omniglass_get_touchpad_specifications(touchpad_handle, &(touchpad_specifications));
     omniglass_get_raw_report(touchpad_handle, &(current_report));
     this->handle = touchpad_handle;
+
+    //create touch gesture mapper default profiles
+    generate_default_mappers();
+    current_gesture_mapper = mappers[application_classes[""]];
 
     //FIXME: C++ does not allow passing members of class instances as callback.
     //  change omniglass to make it export gesture events into parameters on step().
@@ -143,15 +158,22 @@ void Glassd::init(){
     libevdev_set_name(virtual_keyboard_template, "glassd virtual keyboard");
 
     //declare to the uinput subsystem all keycodes that may be triggered on the virtual keyboard.
+    //  ideally a full keyboard should be available, but i don't need all the keys right now.
     int virtual_keyboard_events_definition[] = {
         EV_SYN, SYN_REPORT,
         EV_KEY, KEY_F,
+        EV_KEY, KEY_F6,
         EV_KEY, KEY_F10,
+        EV_KEY, KEY_F11,
         EV_KEY, KEY_TAB,
         EV_KEY, KEY_LEFTSHIFT,
         EV_KEY, KEY_ESC,
         EV_KEY, KEY_SPACE,
         EV_KEY, KEY_ENTER,
+        EV_KEY, KEY_LEFT,
+        EV_KEY, KEY_RIGHT,
+        EV_KEY, KEY_UP,
+        EV_KEY, KEY_DOWN,
         DEVICE_DESCRIPTION_END, DEVICE_DESCRIPTION_END
     };
     register_input_codes(virtual_keyboard_template, virtual_keyboard_events_definition);
@@ -164,6 +186,7 @@ void Glassd::init(){
         return;
     }
     this->virtual_keyboard = virtual_keyboard_device;
+
     printf("initialized glassd.\n");
     fflush(stdout);
     execution_status = status::ready;
@@ -172,105 +195,291 @@ void Glassd::init(){
     //endless state machine execution loop,
     //adapted into non-blocking step function with class instance for state.
 void Glassd::step(){
-        int omniglass_status = omniglass_step(handle);
+    compute_gesture_parameters();
 
-        if(omniglass_status != 0){
-            fprintf(stderr, "Guarapicci here. Somehow omniglass returned error on step. I didn't even code it to do that!\n");
-            modeswitch(tracking_mode::JINX);
-            return;
+    //
+    //COMPUTE GESTURE PARAMETERS
+    //
+
+    // if(single_finger_last_state.is_touching){
+    //     double distance = euclidean_distance(current_report->points[0], omniglass_raw_touchpoint({true,45,120}));
+    //     printf("you are %f units away from the test ref point.\n",distance);
+    //     printf("touching at (%f,%f)\n",single_finger_last_state.x, single_finger_last_state.y);
+    // }
+    switch (current_mode) {
+    case tracking_mode::INHIBIT: //waiting for the user to start switching modes.
+
+        //ungrab, just in case the touchpad was being grabbed before.
+        omniglass_ungrab_touchpad(handle);
+
+        if (current_report->points[0].is_touching && !(single_finger_last_state.is_touching)
+            && euclidean_distance(current_report->points[0],
+                                  omniglass_raw_touchpoint({0, 0, touchpad_specifications->height}))
+                   < DEFAULT_POINT_RADIUS) {
+            printf("waiting on glassing drag.\n");
+            modeswitch(tracking_mode::INHIBIT_TO_GLASSING);
         }
-        // if(single_finger_last_state.is_touching){
-        //     double distance = euclidean_distance(current_report->points[0], omniglass_raw_touchpoint({true,45,120}));
-        //     printf("you are %f units away from the test ref point.\n",distance);
-        //     printf("touching at (%f,%f)\n",single_finger_last_state.x, single_finger_last_state.y);
-        // }
-        switch(current_mode){
-        case tracking_mode::INHIBIT:    //waiting for the user to start switching modes.
-            if(
-                current_report->points[0].is_touching
-                && !(single_finger_last_state.is_touching)
-                && euclidean_distance(current_report->points[0],
-                                      omniglass_raw_touchpoint({0,0,touchpad_specifications->height}))
-                    < DEFAULT_POINT_RADIUS
-                )
-            {
-                printf("waiting on glassing drag.\n");
-                modeswitch(tracking_mode::INHIBIT_TO_GLASSING);
-            }
-            break;
-        case tracking_mode::INHIBIT_TO_GLASSING: //user is trying to switch modes.
-            if (current_report->points[0].is_touching){
-                omniglass_raw_touchpoint current = current_report->points[0];
-                omniglass_raw_touchpoint previous = single_finger_last_state;
-                omniglass_raw_touchpoint drag
-                ({
-                    1,
-                    current.x - previous.x,
-                    current.y - previous.y
-                });
-                if(drag.x != 0 && drag.y !=0 && drag.x > 0 && drag.y < 0){
-                    double tangent = drag.y / drag.x;
-                    if (tangent < (-0.65) && tangent > (-1.535)){ //magic numbers for drag direction, from trial and error.
-                        drag_to_glassing_accumulator += (sqrt(pow(drag.x, 2) + pow(drag.y, 2)));
-                        printf("drag distance is %f\n", drag_to_glassing_accumulator);
-                    }
-                }
-                if(drag_to_glassing_accumulator > DEFAULT_DRAG_TRIGGER_DISTANCE){
-                    printf("drag triggered glassing mode.\n");
-                    drag_to_glassing_accumulator = 0;
-                    edge_slide_accumulated = 0;
-                    modeswitch(tracking_mode::GLASSING);
+        break;
+    case tracking_mode::INHIBIT_TO_GLASSING: //user is trying to switch modes.
+
+
+        //grab the touchpad device to avoid cursor moving when glassing mode needs it off
+        omniglass_grab_touchpad(handle);
+
+        if (current_report->points[0].is_touching) {
+            omniglass_raw_touchpoint current = current_report->points[0];
+            omniglass_raw_touchpoint previous = single_finger_last_state;
+            omniglass_raw_touchpoint drag({1, current.x - previous.x, current.y - previous.y});
+            if (drag.x != 0 && drag.y != 0 && drag.x > 0 && drag.y < 0) {
+                double tangent = drag.y / drag.x;
+                if (tangent < (-0.65)
+                    && tangent
+                           > (-1.535)) { //magic numbers for drag direction, from trial and error.
+                    drag_to_glassing_accumulator += (sqrt(pow(drag.x, 2) + pow(drag.y, 2)));
+                    printf("drag distance is %f\n", drag_to_glassing_accumulator);
                 }
             }
-            else{
-                printf("drag incomplete, returning to inhibit.\n");
+            if (drag_to_glassing_accumulator > DEFAULT_DRAG_TRIGGER_DISTANCE) {
+                printf("drag triggered glassing mode.\n");
                 drag_to_glassing_accumulator = 0;
-                modeswitch(tracking_mode::INHIBIT);
-            }
-            break;
-        case tracking_mode::GLASSING:   //glassing mode: different gestures started will result in different keyboard strokes emulated.
-            if(edge_slide_accumulated > GLASSD_DEFAULTS_TOUCHPAD_DEADZONE){
-                generate_menu(virtual_keyboard);
                 edge_slide_accumulated = 0;
-                printf("sliding on edge triggered menu mode.\n");
-                modeswitch(tracking_mode::MENU);
+                modeswitch(tracking_mode::GLASSING);
             }
-            if(current_report->points[0].is_touching
-                && !(single_finger_last_state.is_touching)
-                && euclidean_distance(current_report->points[0], omniglass_raw_touchpoint({0,45,120})) < DEFAULT_POINT_RADIUS)
-            {
-                printf("touch on corner returned from glassing mode.\n");
-                modeswitch(tracking_mode::INHIBIT);
-            }
-            break;
-        case tracking_mode::MENU: // menu mode: dragging horizontally on top edge selects menus and buttons to actuate on the focused application.
-            if (edge_slide_accumulated > edge_slide_threshold){
-                generate_tab(virtual_keyboard);
-                edge_slide_accumulated = 0.0;
-            }
-            if (edge_slide_accumulated < (-1 * edge_slide_threshold)){
-                generate_shift_tab(virtual_keyboard);
-                edge_slide_accumulated = 0.0;
-            }
-            if (!(current_report->points[0].is_touching)){
-                generate_enter_tap(virtual_keyboard);
-                printf("returning from menu.\n");
-                modeswitch(tracking_mode::INHIBIT);
-            }
-            break;
-        case tracking_mode::JINX:   //hold still, don't panic, avoid breaking anything else.
-            return;
+        } else {
+            printf("drag incomplete, returning to inhibit.\n");
+            drag_to_glassing_accumulator = 0;
+            modeswitch(tracking_mode::INHIBIT);
         }
+        break;
+    //glassing mode: different gestures started will result in different keyboard strokes emulated.
+    case tracking_mode::GLASSING:
+    {
+        //leave glassing if touched on special corner
+        bool just_touched = (
+            current_report->points[0].is_touching
+            && !(previous_report.points[0].is_touching)
+            );
+        omniglass_raw_touchpoint pivot {
+            0,
+            0,
+            touchpad_specifications->height
+        };
+        float distance_to_pivot = euclidean_distance(current_report->points[0], pivot);
+        bool close_enough = (distance_to_pivot < DEFAULT_POINT_RADIUS);
+        if ( just_touched && close_enough )
+        {
+            printf("touch on corner returned from glassing mode.\n");
+            modeswitch(tracking_mode::INHIBIT);
+        }
+
+        //if not leaving glassing mode, let per-application gesture mappers translate motion to keyboard chords.
+        //figure out what immediate movements the user is doing and feed them to the gesture mapper.
+        Gesture_mapper::gesture_action next_action = compute_gesture_next_action();
+        current_gesture_mapper->step(next_action);
+
+        switch(current_gesture_mapper->current_assignment.reaction) {
+        case Gesture_mapper::gesture_reaction::cursor_2D :
+        {
+            fprintf(stderr, "as of state %d "
+                    "i'm haulin' yo' mouse.\n", current_gesture_mapper->current_assignment.state);
+            float drag_x = gesture_data.drags[0][0];
+            float drag_y = gesture_data.drags[0][1];
+            switch (handler_drag.check_for_drag(drag_x,drag_y))
+            {
+            case Gesture_handlers::Drag_outcome::drag_left:
+                simulate_keycodes({KEY_LEFT});
+                break;
+            case Gesture_handlers::Drag_outcome::drag_right:
+                simulate_keycodes({KEY_RIGHT});
+                break;
+            case Gesture_handlers::Drag_outcome::drag_up:
+                simulate_keycodes({KEY_UP});
+                break;
+            case Gesture_handlers::Drag_outcome::drag_down:
+                simulate_keycodes({KEY_DOWN});
+                break;
+            }
+        }
+            break;
+        case Gesture_mapper::gesture_reaction::keycode :
+            fprintf(stderr, "i'm supposed to press keys here, but it's not implemented.\n");
+            break;
+        case Gesture_mapper::gesture_reaction::none:
+            break;
+        }
+        break;
+    }
+    case tracking_mode::JINX: //hold still, don't panic, avoid breaking anything else.
+        return;
+    }
         single_finger_last_state = current_report->points[0];
         return;
     }
 
+void Glassd::compute_gesture_parameters()
+{
+
+    for (int i = 0; i < current_report->points_max; i++) {
+        //copy values of touchpoints from current points to previous points
+        //(not sure if i'm copying values or just their references...)
+        previous_report.points[i] = current_report->points[i];
+    }
 
 
-// int main(int argc, char *argv[])
-// {
-//     QCoreApplication a(argc, argv);
 
-//     return a.exec();
-// }
+    int omniglass_status = omniglass_step(handle);
+    if (omniglass_status != 0) {
+        fprintf(stderr,
+                "Guarapicci here. Somehow omniglass returned error on step. I didn't even code "
+                "it to do that!\n");
+        modeswitch(tracking_mode::JINX);
+        return;
+    }
 
+    int count_then = 0, count_now = 0;
+    for (int i = 0; i < current_report->points_max; i++) {
+        //copy values of touchpoints from current points to previous points
+        //(not sure if i'm copying values or just their references...)
+        if (previous_report.points[i].is_touching) { count_then++; }
+        if (current_report->points[i].is_touching) { count_now++; }
+    }
+    if(count_then != count_now)
+        gesture_data.touch_count_transition = count_now;
+    else
+        gesture_data.touch_count_transition = 255;
+
+    //compute 2D movement deltas of touchpoints
+    for (int i = 0; i < current_report->points_max; i++) {
+        if (!(current_report->points[i].is_touching)) {
+            gesture_data.drags[i][0] = 0;
+            gesture_data.drags[i][1] = 0;
+        } else {
+            float x1 = previous_report.points[i].x;
+            float y1 = previous_report.points[i].y;
+            float x2 = current_report->points[i].x;
+            float y2 = current_report->points[i].y;
+            gesture_data.drags[i][0] = (x2 - x1);
+            gesture_data.drags[i][1] = (y2 - y1);
+        }
+    }
+
+    //figure out for single-touch if the main contact is on one of the borders
+    {
+        gesture_data.is_on_bottom_edge = false;
+        gesture_data.is_on_top_edge = false;
+        gesture_data.is_on_left_edge = false;
+        gesture_data.is_on_right_edge = false;
+
+        omniglass_raw_touchpoint main_point = current_report->points[0];
+        if(main_point.is_touching){
+            float margin = GLASSD_DEFAULTS_TOUCHPAD_DEADZONE;
+            float height = touchpad_specifications->height;
+            float width = touchpad_specifications->width;
+
+            float x_left = 0.0 + margin;
+            float x_right = width - margin;
+            float y_bottom = 0.0 + margin;
+            float y_top = height - margin;
+
+            if (main_point.x < x_left
+                && main_point.y > y_bottom
+                && main_point.y < y_top)
+            {
+                gesture_data.is_on_left_edge == true;
+            }
+            if (main_point.x > x_right
+                && main_point.y > y_bottom
+                && main_point.y < y_top)
+            {
+                gesture_data.is_on_right_edge == true;
+            }
+            if (main_point.y < y_bottom
+                && main_point.x > x_left
+                && main_point.x < x_right)
+            {
+                gesture_data.is_on_bottom_edge == true;
+            }
+            if (main_point.y > y_top
+                && main_point.x > x_left
+                && main_point.x < x_right)
+            {
+                gesture_data.is_on_top_edge == true;
+            }
+
+        }
+
+    }
+}
+
+Gesture_mapper::gesture_action Glassd::compute_gesture_next_action()
+{
+    int presence_change = gesture_data.touch_count_transition;
+    if (presence_change == 0)
+        return Gesture_mapper::gesture_action::released;
+    else {
+        if (presence_change>0){
+            if(presence_change == 1)
+            {
+                if(gesture_data.is_on_top_edge)
+                    return Gesture_mapper::gesture_action::entered_top_edge;
+                if(gesture_data.is_on_bottom_edge)
+                    return Gesture_mapper::gesture_action::entered_bottom_edge;
+                if(gesture_data.is_on_right_edge)
+                    return Gesture_mapper::gesture_action::entered_right_edge;
+                if(gesture_data.is_on_left_edge)
+                    return Gesture_mapper::gesture_action::entered_left_edge;
+            }
+            if(presence_change <=23)
+                return Gesture_mapper::gesture_action::touch_count;
+        }
+    }
+
+
+
+
+    if ((abs(gesture_data.drags[0][0]) > 0) || (abs(gesture_data.drags[0][1]) > 0))
+        return Gesture_mapper::gesture_action::drag_general;
+    else
+        return Gesture_mapper::gesture_action::none;
+}
+
+//This function does much less than its sheer size in Lines-Of-Code suggests.
+//  it just hardwires a bunch of per-application shortcut mappings.
+void Glassd::generate_default_mappers()
+{
+    //all classes and aliases that will be matched to their respective gesture mappers
+    std::map<QString, QString> new_app_classes{{"mpv", "media player"},
+                                               {"org.kde.haruna", "media player"},
+                                               {"org.kde.dolphin", "file browser"},
+                                               {"", "fallback"}};
+    application_classes = new_app_classes;
+
+
+    std::map<QString, Gesture_mapper *> new_mappers;
+    //when all else fails, use the fallback.
+    Gesture_mapper *fallback_mapper = new Gesture_mapper();
+    fallback_mapper->gesture_map
+        = std::map<Gesture_mapper::gesture_entry, Gesture_mapper::gesture_assignment>{
+            {{0, Gesture_mapper::gesture_action::drag_general}, {0, Gesture_mapper::gesture_reaction::cursor_2D, {}}},
+            {{0, Gesture_mapper::gesture_action::entered_top_edge}, {1, Gesture_mapper::gesture_reaction::keycode, {KEY_F6}}},
+            // {{0, Gesture_mapper::entered_top_edge}, {1, Gesture_mapper::none, {}}},
+        };
+    new_mappers["fallback"] = fallback_mapper;
+    new_mappers[""] = fallback_mapper;
+    mappers = new_mappers;
+    // new_mappers.insert("file browser", std::map<>)
+}
+
+//default mode of simulating key-chords is to tap them infinetely fast.
+//  don't hold them, else stuck keys will happen simply because
+//  someone's profile forgot to release them.
+void Glassd::simulate_keycodes(std::list<__u16> keycodes){
+    for (__u16 code : keycodes){
+    libevdev_uinput_write_event(virtual_keyboard, EV_KEY, code, 1);
+    }
+    libevdev_uinput_write_event(virtual_keyboard, EV_SYN, SYN_REPORT, 0);
+    for (__u16 code : keycodes){
+        libevdev_uinput_write_event(virtual_keyboard, EV_KEY, code, 0);
+    }
+    libevdev_uinput_write_event(virtual_keyboard, EV_SYN, SYN_REPORT, 0);
+}
