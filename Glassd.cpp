@@ -121,7 +121,13 @@ void Glassd::modeswitch(tracking_mode new_mode){
 }
 void Glassd::change_gesture_mapper(QString name){
     current_gesture_mapper->reset();
-    current_gesture_mapper = mappers[application_classes[current_application_canonical_id]];
+    std::map<QString, Gesture_mapper *>::iterator search_results;
+    search_results = mappers.find(application_classes[current_application_canonical_id]);
+    if(search_results != mappers.end())
+        current_gesture_mapper = search_results->second;
+    else{
+        current_gesture_mapper = mappers["fallback"];
+    }
 }
 
 //set up all the lower layers the Glassd core instance will operate.
@@ -302,6 +308,7 @@ void Glassd::step(){
         }
             break;
         case Gesture_mapper::gesture_reaction::keycode :
+            simulate_keycodes(current_gesture_mapper->current_assignment.codes);
             fprintf(stderr, "i'm supposed to press keys here, but it's not implemented.\n");
             break;
         case Gesture_mapper::gesture_reaction::none:
@@ -371,8 +378,10 @@ void Glassd::compute_gesture_parameters()
         gesture_data.is_on_right_edge = false;
 
         omniglass_raw_touchpoint main_point = current_report->points[0];
+        float main_x = (float)main_point.x;
+        float main_y = (float)main_point.y;
         if(main_point.is_touching){
-            float margin = GLASSD_DEFAULTS_TOUCHPAD_DEADZONE;
+            float margin = DEFAULT_POINT_RADIUS;
             float height = touchpad_specifications->height;
             float width = touchpad_specifications->width;
 
@@ -381,29 +390,29 @@ void Glassd::compute_gesture_parameters()
             float y_bottom = 0.0 + margin;
             float y_top = height - margin;
 
-            if (main_point.x < x_left
-                && main_point.y > y_bottom
-                && main_point.y < y_top)
+            if (main_x < x_left
+                && main_y > y_bottom
+                && main_y < y_top)
             {
-                gesture_data.is_on_left_edge == true;
+                gesture_data.is_on_left_edge = true;
             }
-            if (main_point.x > x_right
-                && main_point.y > y_bottom
-                && main_point.y < y_top)
+            if (main_x > x_right
+                && main_y > y_bottom
+                && main_y < y_top)
             {
-                gesture_data.is_on_right_edge == true;
+                gesture_data.is_on_right_edge = true;
             }
-            if (main_point.y < y_bottom
-                && main_point.x > x_left
-                && main_point.x < x_right)
+            if (main_y < y_bottom
+                && main_x > x_left
+                && main_x < x_right)
             {
-                gesture_data.is_on_bottom_edge == true;
+                gesture_data.is_on_bottom_edge = true;
             }
-            if (main_point.y > y_top
-                && main_point.x > x_left
-                && main_point.x < x_right)
+            if ((main_y > y_top)
+                && (main_x > x_left)
+                && (main_x < x_right))
             {
-                gesture_data.is_on_top_edge == true;
+                gesture_data.is_on_top_edge = true;
             }
 
         }
@@ -461,7 +470,7 @@ void Glassd::generate_default_mappers()
     fallback_mapper->gesture_map
         = std::map<Gesture_mapper::gesture_entry, Gesture_mapper::gesture_assignment>{
             {{0, Gesture_mapper::gesture_action::drag_general}, {0, Gesture_mapper::gesture_reaction::cursor_2D, {}}},
-            {{0, Gesture_mapper::gesture_action::entered_top_edge}, {1, Gesture_mapper::gesture_reaction::keycode, {KEY_F6}}},
+            {{0, Gesture_mapper::gesture_action::entered_top_edge}, {1, Gesture_mapper::gesture_reaction::keycode, {KEY_F10}}},
             // {{0, Gesture_mapper::entered_top_edge}, {1, Gesture_mapper::none, {}}},
         };
     new_mappers["fallback"] = fallback_mapper;
