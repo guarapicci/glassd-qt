@@ -115,8 +115,8 @@ private:
 
     const int DEVICE_DESCRIPTION_END = -1;
 
-    const double DEFAULT_POINT_RADIUS = 24.1;
-    const double DEFAULT_DRAG_TRIGGER_DISTANCE = 25;
+    const double DEFAULT_POINT_RADIUS = 10.1;
+    const double DEFAULT_DRAG_TRIGGER_DISTANCE = 14;
 
     QString current_application_canonical_id = "";
 
