@@ -1,0 +1,22 @@
+{
+    "KPlugin": {
+        "Name": "Plasma Glassd integration",
+        "Description": "enables interaction between glassd and plasma",
+        "Icon": "preferences-system-windows",
+
+        "Authors": [
+            {
+                "Email": "fmcro2005@gmail.com",
+                "Name": "Felipe Choi"
+            }
+            ],
+        "Id": "glassd-kwin",
+        "Version": "0.1",
+        "License": "GPLv3",
+        "Website": ""
+        },
+        "X-Plasma-API": "javascript",
+        "X-Plasma-MainScript": "code/main.js",
+        "KPackageStructure": "KWin/Script"
+}
+

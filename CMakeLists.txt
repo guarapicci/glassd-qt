@@ -53,3 +53,5 @@ install(TARGETS glassd
 install(FILES "63-glassd-uinput.rules"
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/udev/rules.d
 )
+install(FILES "glassd-kwin/contents/code/main.js"
+    DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/glassd/kwin-integration)
