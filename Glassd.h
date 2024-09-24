@@ -9,6 +9,8 @@
 
 #include <list>
 
+#include <QDebug>
+
 extern "C"{
     #include <libevdev/libevdev.h>
     #include <libevdev/libevdev-uinput.h>

@@ -122,9 +122,13 @@ void Glassd::modeswitch(tracking_mode new_mode){
 void Glassd::change_gesture_mapper(QString name){
     current_gesture_mapper->reset();
     std::map<QString, Gesture_mapper *>::iterator search_results;
-    search_results = mappers.find(application_classes[current_application_canonical_id]);
-    if(search_results != mappers.end())
+    QString app_class = application_classes[current_application_canonical_id];
+    search_results = mappers.find(app_class);
+    if(search_results != mappers.end()){
+        if ( !(app_class.isEmpty()) )
+            qDebug() << " changing to profile " << app_class << Qt::endl;
         current_gesture_mapper = search_results->second;
+    }
     else{
         current_gesture_mapper = mappers["fallback"];
     }
@@ -180,6 +184,13 @@ void Glassd::init(){
         EV_KEY, KEY_RIGHT,
         EV_KEY, KEY_UP,
         EV_KEY, KEY_DOWN,
+        EV_KEY, KEY_7,
+        EV_KEY, KEY_8,
+        EV_KEY, KEY_9,
+        EV_KEY, KEY_0,
+        EV_KEY, KEY_LEFTCTRL,
+        EV_KEY, KEY_PAGEDOWN,
+        EV_KEY, KEY_PAGEUP,
         DEVICE_DESCRIPTION_END, DEVICE_DESCRIPTION_END
     };
     register_input_codes(virtual_keyboard_template, virtual_keyboard_events_definition);
@@ -309,8 +320,102 @@ void Glassd::step(){
             break;
         case Gesture_mapper::gesture_reaction::keycode :
             simulate_keycodes(current_gesture_mapper->current_assignment.codes);
-            fprintf(stderr, "i'm supposed to press keys here, but it's not implemented.\n");
+            // fprintf(stderr, "i'm supposed to press keys here, but it's not implemented.\n");
             break;
+        case Gesture_mapper::gesture_reaction::cursor_horiz_1D:
+        {
+            float drag_x = gesture_data.drags[0][0];
+            float drag_y = gesture_data.drags[0][1];
+
+            std::list<__u16> remapped_keys_left = {KEY_LEFT};
+            std::list<__u16> remapped_keys_right = {KEY_RIGHT};
+
+            std::list<__u16> assigned_codes = current_gesture_mapper->current_assignment.codes;
+            if(assigned_codes.size() >= 4) {
+                remapped_keys_left = {};
+                remapped_keys_right = {};
+                std::list<__u16>::iterator next_code = assigned_codes.begin();
+                std::list<__u16> *remap_target = &remapped_keys_left;
+                while(*next_code != KEY_RESERVED){
+                    remap_target->push_back(*next_code);
+                    next_code++;
+                    if(next_code == assigned_codes.end()){
+                        goto gesture_reaction_horiz_invalid_codes;
+                    }
+                }
+                next_code++;
+                remap_target = &remapped_keys_right;
+                while(*next_code != KEY_RESERVED){
+                    remap_target->push_back(*next_code);
+                    next_code++;
+                    if(next_code == assigned_codes.end()){
+                        goto gesture_reaction_horiz_invalid_codes;
+                    }
+                }
+            }
+            switch (handler_drag.check_for_drag(drag_x,drag_y)) {
+            case Gesture_handlers::Drag_outcome::drag_left:
+                simulate_keycodes(remapped_keys_left);
+                qDebug() << "remapped left (" << remapped_keys_left << ")" << Qt::endl;
+                break;
+            case Gesture_handlers::Drag_outcome::drag_right:
+                qDebug() << "remapped right (" << remapped_keys_right << ")" << Qt::endl;
+                simulate_keycodes(remapped_keys_right);
+                break;
+            }
+            break;
+            gesture_reaction_horiz_invalid_codes:
+                qDebug() << "invalid keystroke combo on gesture mapper definition." << Qt::endl;
+                current_gesture_mapper->reset();
+                break;
+        }
+        case Gesture_mapper::gesture_reaction::cursor_vert_1D:
+        {
+            float drag_x = gesture_data.drags[0][0];
+            float drag_y = gesture_data.drags[0][1];
+
+            std::list<__u16> remapped_keys_down = {KEY_DOWN};
+            std::list<__u16> remapped_keys_up = {KEY_UP};
+
+            std::list<__u16> assigned_codes = current_gesture_mapper->current_assignment.codes;
+            if(assigned_codes.size() >= 4) {
+                remapped_keys_down = {};
+                remapped_keys_up = {};
+                std::list<__u16>::iterator next_code = assigned_codes.begin();
+                std::list<__u16> *remap_target = &remapped_keys_down;
+                while(*next_code != KEY_RESERVED){
+                    remap_target->push_back(*next_code);
+                    next_code++;
+                    if(next_code == assigned_codes.end()){
+                        goto gesture_reaction_vert_invalid_codes;
+                    }
+                }
+                next_code++;
+                remap_target = &remapped_keys_up;
+                while(*next_code != KEY_RESERVED){
+                    remap_target->push_back(*next_code);
+                    next_code++;
+                    if(next_code == assigned_codes.end()){
+                        goto gesture_reaction_vert_invalid_codes;
+                    }
+                }
+            }
+            switch (handler_drag.check_for_drag(drag_x,drag_y)) {
+            case Gesture_handlers::Drag_outcome::drag_down:
+                simulate_keycodes(remapped_keys_down);
+                qDebug() << "remapped down (" << remapped_keys_down << ")" << Qt::endl;
+                break;
+            case Gesture_handlers::Drag_outcome::drag_up:
+                qDebug() << "remapped up (" << remapped_keys_up << ")" << Qt::endl;
+                simulate_keycodes(remapped_keys_up);
+                break;
+            }
+            break;
+        gesture_reaction_vert_invalid_codes:
+            qDebug() << "invalid keystroke combo on gesture mapper definition." << Qt::endl;
+            current_gesture_mapper->reset();
+            break;
+        }
         case Gesture_mapper::gesture_reaction::none:
             break;
         }
@@ -460,6 +565,7 @@ void Glassd::generate_default_mappers()
     std::map<QString, QString> new_app_classes{{"mpv", "media player"},
                                                {"org.kde.haruna", "media player"},
                                                {"org.kde.dolphin", "file browser"},
+                                               {"firefox", "web browser"},
                                                {"", "fallback"}};
     application_classes = new_app_classes;
 
@@ -471,11 +577,42 @@ void Glassd::generate_default_mappers()
         = std::map<Gesture_mapper::gesture_entry, Gesture_mapper::gesture_assignment>{
             {{0, Gesture_mapper::gesture_action::drag_general}, {0, Gesture_mapper::gesture_reaction::cursor_2D, {}}},
             {{0, Gesture_mapper::gesture_action::entered_top_edge}, {1, Gesture_mapper::gesture_reaction::keycode, {KEY_F10}}},
+            {{1, Gesture_mapper::gesture_action::released}, {2, Gesture_mapper::gesture_reaction::none, {}}},
+            {{2, Gesture_mapper::gesture_action::drag_general}, {2, Gesture_mapper::gesture_reaction::cursor_2D, {}}},
+            {{2, Gesture_mapper::gesture_action::released}, {0, Gesture_mapper::gesture_reaction::keycode, {KEY_ENTER}}},
             // {{0, Gesture_mapper::entered_top_edge}, {1, Gesture_mapper::none, {}}},
         };
     new_mappers["fallback"] = fallback_mapper;
     new_mappers[""] = fallback_mapper;
+
+    Gesture_mapper *media_player_profile = new Gesture_mapper();
+    media_player_profile->gesture_map
+        = std::map<Gesture_mapper::gesture_entry, Gesture_mapper::gesture_assignment>{
+            {{0, Gesture_mapper::gesture_action::entered_bottom_edge}, {1, Gesture_mapper::gesture_reaction::none, {}}},
+            {{0, Gesture_mapper::gesture_action::entered_right_edge}, {2, Gesture_mapper::gesture_reaction::none, {}}},
+            {{1, Gesture_mapper::gesture_action::drag_general}, {1, Gesture_mapper::gesture_reaction::cursor_horiz_1D, {}}},
+            {{1, Gesture_mapper::gesture_action::released}, {0, Gesture_mapper::gesture_reaction::none, {}}},
+            {{2, Gesture_mapper::gesture_action::drag_general}, {2, Gesture_mapper::gesture_reaction::cursor_vert_1D, {KEY_0, KEY_RESERVED, KEY_9, KEY_RESERVED} }}, //using KEY_RESERVED as a separator
+            {{2, Gesture_mapper::gesture_action::released}, {0, Gesture_mapper::gesture_reaction::keycode, {KEY_ENTER} }},
+            };
+    new_mappers["media player"] = media_player_profile;
+
+
+    Gesture_mapper *web_browser_profile = new Gesture_mapper();
+    web_browser_profile->gesture_map
+        = std::map<Gesture_mapper::gesture_entry, Gesture_mapper::gesture_assignment>{
+            {{0, Gesture_mapper::gesture_action::entered_bottom_edge}, {1, Gesture_mapper::gesture_reaction::none, {}}},
+            {{0, Gesture_mapper::gesture_action::entered_right_edge}, {2, Gesture_mapper::gesture_reaction::none, {}}},
+            {{1, Gesture_mapper::gesture_action::drag_general}, {1, Gesture_mapper::gesture_reaction::cursor_horiz_1D, {KEY_LEFTCTRL,KEY_PAGEUP,KEY_RESERVED, KEY_LEFTCTRL,KEY_PAGEDOWN,KEY_RESERVED}}},
+            {{1, Gesture_mapper::gesture_action::released}, {0, Gesture_mapper::gesture_reaction::none, {}}},
+            {{2, Gesture_mapper::gesture_action::drag_general}, {2, Gesture_mapper::gesture_reaction::cursor_vert_1D, {KEY_9, KEY_RESERVED, KEY_0, KEY_RESERVED} }},
+            {{2, Gesture_mapper::gesture_action::released}, {0, Gesture_mapper::gesture_reaction::keycode, {KEY_ENTER} }},
+            };
+    new_mappers["web browser"] = web_browser_profile;
+
     mappers = new_mappers;
+
+
     // new_mappers.insert("file browser", std::map<>)
 }
 

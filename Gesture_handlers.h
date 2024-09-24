@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <cmath>
 namespace Gesture_handlers {
 
 enum class Drag_outcome: uint8_t{
@@ -22,8 +23,8 @@ public:
     // to move some element horizontally or vertically (or nowhere).
     Drag_outcome check_for_drag(float x, float y){
         Drag_outcome decision{Drag_outcome::none};
-        accumulated_x += x;
-        accumulated_y += y;
+        accumulated_x += x *abs(x);
+        accumulated_y += y * abs(y);
 
         if(abs(accumulated_x) > threshold){
             if(accumulated_x > 0){
@@ -59,8 +60,8 @@ private:
     float accumulated_y{0};
 
     //values for filtering and quantization
-    const float deadzone{0.9};
-    const float threshold{2.8};
+    const float deadzone{0.3};
+    const float threshold{1.2};
 };
 
 } // namespace Gesture_handlers
